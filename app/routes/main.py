@@ -1,6 +1,8 @@
 from flask import Blueprint, jsonify, request
 from app.models.user import LoginPayLoad
 from pydantic import ValidationError
+from app import db
+from bson import ObjectId
 
 main_bp = Blueprint('main_bp', __name__)
 
@@ -11,7 +13,12 @@ def index():
 # GET PRODUTOS
 @main_bp.route('/products')
 def get_products():
-    return jsonify({"message": "Todos os Produtos"})
+    products_cursor = db.products.find({})
+    products_list = []
+    for products in products_cursor:
+        products['_id'] = str(products['_id'])
+        products_list.append(products)
+    return jsonify(products_list)
 
 # POST PRODUTOS
 @main_bp.route('/products', methods=['POST'])
@@ -19,9 +26,19 @@ def create_product():
     return jsonify({"message": "Postar Produtos"})
 
 # GET UM PRODUTO
-@main_bp.route('/products/<int:product_id>')
+@main_bp.route('/products/<string:product_id>')
 def get_product_by_id(product_id):
-    return jsonify({"message": f"Um unico produto {product_id}"})
+    try:
+        oid = ObjectId(product_id)
+    except Exception as e:
+        return jsonify({"message": f"Erro ao buscar {product_id}: {e}"})
+
+    product = db.products.find_one({'_id':oid})
+    if product:
+        product['_id'] = str(product['_id'])
+        return jsonify(product)
+    else:
+        return jsonify({"message": f"Produto nao encontrado"})
 
 # ATUALIZA UM PRODUTO
 @main_bp.route('/products/<int:product_id>', methods=['PUT'])
@@ -29,7 +46,7 @@ def update_product(product_id):
     return jsonify({"message": f"Atualiza {product_id}"})
 
 # DELETE UM PRODUTO
-@main_bp.route('/products/<int:product_id>', methods=['PUT'])
+@main_bp.route('/products/<int:product_id>', methods=['DELETE'])
 def delete_product(product_id):
     return jsonify({"message": f"Delete {product_id}"})
 
