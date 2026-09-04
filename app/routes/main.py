@@ -4,9 +4,13 @@ from pydantic import ValidationError
 from app import db
 from bson import ObjectId
 from app.models.products import *
+from app.models.sale import Sale
 from app.decorators import token_required
 from datetime import datetime, timedelta, timezone
 import jwt
+import csv
+import os
+import io
 
 main_bp = Blueprint('main_bp', __name__)
 
@@ -90,8 +94,94 @@ def delete_product(token, product_id):
 
 # IMPORTA PARA UM ARQUIVO
 @main_bp.route('/sales/upload', methods=['POST'])
-def upload_dales():
-    return jsonify({"message": "Upload arquivos"})
+@token_required
+def upload_sales(token):
+
+    print("ENTROU NA ROTA")
+
+    if 'file' not in request.files:
+        return jsonify({
+            "erro": "Nenhum arquivo foi enviado"
+        }), 400
+
+    file = request.files['file']
+
+    if file.filename == '':
+        return jsonify({
+            "erro": "Nenhum arquivo foi selecionado"
+        }), 400
+
+    if not file.filename.lower().endswith(".csv"):
+        return jsonify({
+            "erro": "O arquivo deve ser CSV"
+        }), 400
+
+    print("ANTES DO READ")
+
+    csv_stream = io.StringIO(
+        file.stream.read().decode('UTF-8'),
+        newline=None
+    )
+
+    print("DEPOIS DO READ")
+
+    csv_reader = csv.DictReader(csv_stream)
+
+    sales_to_insert = []
+    errors = []
+
+    for row_num, row in enumerate(csv_reader, 1):
+
+        print(f"VALIDANDO LINHA {row_num}")
+
+        try:
+            sale_data = Sale(**row)
+
+            sales_to_insert.append(
+                sale_data.model_dump()
+            )
+
+        except ValidationError as e:
+            print(f"ERRO NA LINHA {row_num}: {e}")
+
+            errors.append(
+                f"Linha {row_num} com dados inválidos"
+            )
+
+        except Exception as e:
+            print(f"ERRO INESPERADO NA LINHA {row_num}: {e}")
+
+            errors.append(
+                f"Linha {row_num} com erro inesperado"
+            )
+
+    print("VALIDAÇÃO TERMINOU")
+    print("Vendas válidas:", len(sales_to_insert))
+    print("Erros:", len(errors))
+
+    if sales_to_insert:
+
+        print("ANTES DO INSERT")
+
+        try:
+            result = db.sales.insert_many(sales_to_insert)
+
+            print("DEPOIS DO INSERT")
+            print("Inseridos:", len(result.inserted_ids))
+
+        except Exception as e:
+
+            print("ERRO NO MONGO:", e)
+
+            return jsonify({
+                "erro": f"Erro ao inserir no banco: {str(e)}"
+            }), 500
+
+    return jsonify({
+        "message": "Upload realizado",
+        "vendas importadas": len(sales_to_insert),
+        "erros encontrados": errors
+    }), 200
 
 @main_bp.route('/login', methods=['POST'])
 def login():
