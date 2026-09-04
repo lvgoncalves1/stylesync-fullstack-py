@@ -1,29 +1,35 @@
-from flask import Blueprint, jsonify, request, current_app
-from app.models.user import LoginPayLoad
-from pydantic import ValidationError
+from flask import Blueprint, jsonify, request, current_app, render_template, redirect, url_for, flash, session
 from app import db
 from bson import ObjectId
+from pydantic import ValidationError
+from app.decorators import token_required
+from app.models.user import LoginPayLoad
 from app.models.products import *
 from app.models.sale import Sale
-from app.decorators import token_required
 from datetime import datetime, timedelta, timezone
 import jwt
-import csv
-import os
 import io
+import csv
 
 main_bp = Blueprint('main_bp', __name__)
 
 @main_bp.route('/')
 def index():
-    return jsonify({"message": "Bem vindo"})
+    if 'jwt_token' not in session:
+        return redirect(url_for('main_bp.login'))
+    return redirect(url_for('main_bp.dashboard'))
+
+@main_bp.route('/dashboard')
+def dashboard():
+    if 'jwt_token' not in session:
+        return redirect(url_for('main_bp.login'))
+    return render_template('dashboard.html', title='Dashboard')
 
 # GET PRODUTOS
 @main_bp.route('/products')
 def get_products():
     products_cursor = db.products.find({})
-    products_list = [ProductDBModel(**product).model_dump(by_alias=True, exclude_none=True) for product in products_cursor]
-    return jsonify(products_list)
+    return render_template('products.html', products=products_cursor, title='Produtos')
 
 # POST PRODUTOS
 @main_bp.route('/products', methods=['POST'])
@@ -31,10 +37,10 @@ def get_products():
 def create_product(token):
     try:
         product = Product(**request.get_json())
+        result = db.products.insert_one(product.model_dump())
     except ValidationError as e:
         return jsonify({"message": f"Error na rota {e.errors()}"})
 
-    result = db.products.insert_one(product.model_dump())
     return jsonify({"message": "Criado com sucesso",
                     'id': str(result.inserted_id)}), 201
 
@@ -93,6 +99,14 @@ def delete_product(token, product_id):
     return "", 204
 
 # IMPORTA PARA UM ARQUIVO
+@main_bp.route('/vendas/upload', methods=['GET'])
+def upload_sales_page():
+    if 'jwt_token' not in session:
+        return redirect(url_for('main_bp.login'))
+    return render_template('upload_sales.html', title='Upload de Vendas')
+
+
+
 @main_bp.route('/sales/upload', methods=['POST'])
 @token_required
 def upload_sales(token):
@@ -184,24 +198,26 @@ def upload_sales(token):
     }), 200
 
 @main_bp.route('/login', methods=['POST'])
+@main_bp.route('/login', methods=['GET','POST'])
 def login():
-    try:
-        raw_data = request.get_json()
-        user_data = LoginPayLoad(**raw_data)
-    except ValidationError as e:
-        return jsonify({"message": f"error:{e.errors}"}), 400
-    except Exception as e:
-        return jsonify({"message": {e}}), 500
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        user_data = LoginPayLoad(username=username, password=password)
+    
+        user_in_db = db.users.find_one({"username": username})
 
-    if user_data.username == 'admin' and user_data.password == '123':
-        token = jwt.encode(
-            {
-                "user_id": user_data.username,
-                "exp": datetime.now(timezone.utc) + timedelta(minutes=30)
-            },
-            current_app.config['SECRET_KEY'],
-            algorithm='HS256'
-        )
-        return jsonify({'access token': token}), 200
-    return jsonify({"message": "Credenciais invalidas"}), 401
+        if user_in_db and user_in_db.get('password') == password:
+            token = jwt.encode({
+                'user_id': user_data.username,
+                'exp': datetime.now(timezone.utc) + timedelta(minutes=30) # Token expira em 30 minutos
+            }, current_app.config['SECRET_KEY'], algorithm="HS256")
+
+            session['jwt_token'] = token    
+            return redirect(url_for('main_bp.dashboard'))
+        else:
+            flash('Usuário ou senha inválidos.', 'danger')
+            return redirect(url_for('main_bp.login'))
+    
+    return render_template('login.html', title='Login')
 
