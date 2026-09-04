@@ -20,3 +20,9 @@ class ProductDBModel(Product):
         if self.id:
             data['_id'] = str(data['_id'])
         return data
+
+class UpdateProduct(BaseModel):
+    name: Optional[str] = None
+    price: Optional[str] = None
+    description: Optional[str] = None
+    stock: Optional[str] = None

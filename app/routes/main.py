@@ -50,14 +50,43 @@ def get_product_by_id(product_id):
         return jsonify({"message": f"Produto nao encontrado"})
 
 # ATUALIZA UM PRODUTO
-@main_bp.route('/products/<int:product_id>', methods=['PUT'])
-def update_product(product_id):
-    return jsonify({"message": f"Atualiza {product_id}"})
+@main_bp.route('/product/<string:product_id>', methods=['PUT'])
+@token_required
+def update_product(data, product_id):
+    try:
+        oid = ObjectId(product_id)
+        update_data = UpdateProduct(**request.get_json())
+    except ValidationError as e:
+        return jsonify({'message': e.errors()}), 400
+
+    update_result = db.products.update_one(
+        {
+            "_id": oid
+        },
+        {"$set": update_data.model_dump(exclude_unset=True)}
+    )
+
+    if update_result.matched_count == 0:
+        return jsonify({'error': "Produto nao encontrado"}) 
+
+    update_product = db.products.find_one({"_id": oid})
+    return jsonify(ProductDBModel(**update_product).model_dump(by_alias=True, exclude=None)), 200
 
 # DELETE UM PRODUTO
-@main_bp.route('/products/<int:product_id>', methods=['DELETE'])
-def delete_product(product_id):
-    return jsonify({"message": f"Delete {product_id}"})
+@main_bp.route('/product/<string:product_id>', methods=['DELETE'])
+@token_required
+def delete_product(token, product_id):
+    try:
+        oid = ObjectId(product_id)
+    except Exception as e:
+        return jsonify({"error": "id do produto invalido"}), 400
+    
+    delete_product = db.products.delete_one({"_id": oid})
+
+    if delete_product.deleted_count == 0:
+        return jsonify({'error': "Produto nao encontrado"}), 400
+    
+    return "", 204
 
 # IMPORTA PARA UM ARQUIVO
 @main_bp.route('/sales/upload', methods=['POST'])
